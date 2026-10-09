@@ -1,0 +1,87 @@
+# 实验 1 参考实现（教师自用，不外发）：合并门禁 + 主干制品。
+# 放到示例仓库的 .github/workflows/ci.yml。
+#
+# 触发：向 main 发起 PR 时跑门禁；PR 合入 main（push）后再打包并上传制品。
+# 注意：这个工作流不能加 paths / paths-ignore 过滤，否则被跳过的 required check
+# 会一直处于 Pending，PR 永远合不进去（指导书“常见问题”）。
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # job 名就是规则集里选择的 required status check 名称。
+  ci:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # 把触发上下文打出来：PR 事件里 github.sha 是 GitHub 临时合成的合并提交，
+      # 不是分支上的提交，也不会出现在 main 的历史里（指导书分析问题 2 用这组数据）。
+      - name: 触发上下文
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "event=$EVENT ref=$REF"
+          echo "github.sha=$SHA"
+          echo "pull_request.head.sha=${PR_HEAD_SHA:-（非 PR 事件）}"
+
+      - name: gofmt
+        run: make fmt-check
+
+      - name: vet
+        run: make vet
+
+      - name: test
+        run: make test
+
+      # 只在合入 main 之后打包上传：此时 github.sha 是 main 上真实存在的提交。
+      - name: package
+        if: github.event_name == 'push'
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          make package VERSION=0.0.0-main BUILD_NO="$RUN_NUMBER" COMMIT="$COMMIT"
+          sha256sum dist/*/enroll-conflict dist/*.tar.gz
+
+      - name: upload artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: enroll-conflict-${{ github.sha }}-${{ github.run_number }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          retention-days: 14
+
+      # —— 以下步骤仅用于测试仓库，不属于参考实现 ——
+      # 公开仓库不登录读不到日志原文，用注解把关键值带出来。
+      - name: 诊断（仅测试）
+        if: always()
+        env:
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          echo "::notice title=go::$(go version)"
+          echo "::notice title=ctx::event=$EVENT sha=$SHA pr_head=${PR_HEAD_SHA:-none} run_number=$RUN_NUMBER attempt=$RUN_ATTEMPT"
+          if ls dist/*/BUILD_INFO >/dev/null 2>&1; then
+            echo "::notice title=build-info::$(tr '\n' ' ' < dist/*/BUILD_INFO)"
+            echo "::notice title=sha256::$(sha256sum dist/*/enroll-conflict dist/*.tar.gz | cut -c1-16,65- | tr '\n' ' ')"
+          fi
