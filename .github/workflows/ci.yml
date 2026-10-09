@@ -53,9 +53,10 @@ jobs:
         if: github.event_name == 'push'
         env:
           RUN_NUMBER: ${{ github.run_number }}
+          RUN_ID: ${{ github.run_id }}
           COMMIT: ${{ github.sha }}
         run: |
-          make package VERSION=0.0.0-main BUILD_NO="$RUN_NUMBER" COMMIT="$COMMIT"
+          make package VERSION=0.0.0-main BUILD_NO="$RUN_NUMBER" RUN_ID="$RUN_ID" COMMIT="$COMMIT"
           sha256sum dist/*/enroll-conflict dist/*.tar.gz
 
       - name: upload artifact

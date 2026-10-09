@@ -36,6 +36,7 @@ get() { printf '%s\n' "$info" | sed -n "s/^$1=//p" | head -n 1; }
 commit=$(get commit)
 version=$(get version)
 build_no=$(get build_no)
+run_id=$(get run_id)
 [ -n "$commit" ] && [ "$commit" != "unknown" ] || { echo "BUILD_INFO 没有有效的 commit" >&2; exit 2; }
 
 echo "== 3. 提交 $commit"
@@ -64,7 +65,13 @@ esac
 case "$url" in
   https://github.com/*)
     echo "提交页面（含关联的 PR）: $url/commit/$commit"
-    echo "本次构建（构建号 $build_no）见: $url/actions"
+    case "$run_id" in
+      ''|*[!0-9]*)
+        echo "构建它的运行: BUILD_INFO 里没有有效的 run_id，只能到 $url/actions 按构建号 $build_no 去找" \
+             "（ci 与 release 的构建号各自从 1 计数，要先判断是哪个工作流）"
+        ;;
+      *) echo "构建它的运行: $url/actions/runs/$run_id" ;;
+    esac
     ;;
   *)
     echo "（origin 不是 GitHub 地址，无法给出提交页面链接）"

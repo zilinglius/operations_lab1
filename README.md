@@ -27,7 +27,7 @@ make package VERSION=1.0.0 BUILD_NO=1      # 打包到 dist/
 dist/enroll-conflict_1.0.0_linux_amd64/enroll-conflict -version
 ```
 
-`make package` 的三个参数 `VERSION`、`BUILD_NO`、`COMMIT` 就是制品的三个追溯标识；不传时分别是 `dev`、`local` 和本地 `HEAD`，表示“没有经过流水线”。
+`make package` 的参数 `VERSION`、`BUILD_NO`、`COMMIT` 是制品的三个追溯标识，`RUN_ID` 用来指回具体的那次运行；不传时分别是 `dev`、`local`、本地 `HEAD` 和 `local`，表示“没有经过流水线”。
 
 ## 文件
 

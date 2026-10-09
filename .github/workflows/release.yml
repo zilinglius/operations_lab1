@@ -41,8 +41,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           RUN_NUMBER: ${{ github.run_number }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          make package VERSION="${TAG#v}" BUILD_NO="$RUN_NUMBER" COMMIT="$GITHUB_SHA"
+          make package VERSION="${TAG#v}" BUILD_NO="$RUN_NUMBER" RUN_ID="$RUN_ID" COMMIT="$GITHUB_SHA"
           sha256sum dist/*/enroll-conflict dist/*.tar.gz
 
       - name: 创建 Release
