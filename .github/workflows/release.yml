@@ -1,0 +1,91 @@
+# 实验 1 参考实现（教师自用，不外发）：打 tag 触发发布。
+# 放到示例仓库的 .github/workflows/release.yml。
+#
+# 触发：推送形如 v1.0.0 的 tag。
+# 发布门禁：tag 指向的提交必须在 main 的历史上；发布前重新跑一遍质量门禁。
+# 产出：GitHub Release，附带 tar.gz 制品和 .sha256 校验文件。Release 里的附件不会像
+# workflow artifact 那样默认 90 天后过期，所以长期保留的制品放在 Release。
+name: release
+
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+
+permissions:
+  contents: write # gh release create 需要写权限；其余工作流保持只读
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 要完整历史，才能判断 tag 是否在 main 上
+
+      - name: 发布门禁：tag 必须指向 main 上的提交
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME 指向的提交不在 main 上，拒绝发布"
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: 质量门禁
+        run: make fmt-check vet test
+
+      - name: package
+        env:
+          TAG: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          make package VERSION="${TAG#v}" BUILD_NO="$RUN_NUMBER" COMMIT="$GITHUB_SHA"
+          sha256sum dist/*/enroll-conflict dist/*.tar.gz
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/*.tar.gz dist/*.tar.gz.sha256 \
+            --title "$TAG" --generate-notes --verify-tag
+
+  # 选做 O1 的参考实现。必须和 release 在同一个工作流里：用 GITHUB_TOKEN 创建的
+  # Release 不会再触发别的工作流（GitHub 为避免递归触发的规定）。
+  # 镜像从 Release 附件构建，不重新编译，附件的 sha256 先校验。
+  image:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7 # 只为取 Dockerfile，不编译
+
+      - name: 下载 Release 附件并校验
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.tar.gz*' --dir pkg
+          (cd pkg && sha256sum -c ./*.sha256 && tar -xzf ./*.tar.gz)
+
+      - name: 构建并推送镜像
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 镜像名必须小写，而仓库名可能含大写字母
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${TAG#v}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -f Dockerfile \
+            --build-arg VERSION="$version" --build-arg COMMIT="$GITHUB_SHA" \
+            --build-arg SOURCE="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            -t "$image:$version" -t "$image:$GITHUB_SHA" pkg/*/
+          docker push "$image:$version"
+          docker push "$image:$GITHUB_SHA"
+          echo "digest: $(docker inspect --format '{{index .RepoDigests 0}}' "$image:$version")"
